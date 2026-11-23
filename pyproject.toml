@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assistant-potions"
+version = "0.1.0"
+description = "Assistant de brassage de potions Bedrock"
+requires-python = ">=3.10"
+
+[project.scripts]
+potions = "assistant_potions.cli:main"
+
+[tool.setuptools]
+packages = ["assistant_potions"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
