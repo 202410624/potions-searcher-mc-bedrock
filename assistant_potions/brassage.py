@@ -1,9 +1,9 @@
 """Calcule les suites de brassage réalisables avec les potions et les réactifs en stock."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from .catalogue import Catalogue, Transition
+from .catalogue import WATER_BOTTLE_ALIASES, Catalogue, Transition
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,39 @@ def calculer_suites(
             recipes.setdefault(step.arrivee, []).append(next_recipe)
             visit(step.arrivee, visited | {step.arrivee}, next_recipe)
 
-    for start in sorted(catalogue.potions.intersection(quantites)):
-        if quantites[start] > 0:
-            visit(start, frozenset({start}), Suite(start, (), {}))
+    available = {
+        WATER_BOTTLE_ALIASES.get(name, name)
+        for name, quantity in quantites.items()
+        if quantity > 0
+    }
+    for start in sorted(catalogue.potions.intersection(available)):
+        visit(start, frozenset({start}), Suite(start, (), {}))
     return recipes
+
+
+def retraits_brassage(
+    recipes: Sequence[Suite], stock: Mapping[str, int], quantity: int
+) -> dict[str, int] | None:
+    """Retourne ce que consomme la suite la plus courte qui permet de produire tout le lot.
+    Tient compte des alias d’eau déjà stockés. Retourne None si aucune suite ne suffit.
+    """
+    for recipe in sorted(recipes, key=lambda suite: len(suite.etapes)):
+        withdrawals = {name: total * quantity for name, total in recipe.total_reactifs.items()}
+        if any(stock.get(name, 0) < total for name, total in withdrawals.items()):
+            continue
+
+        # Un ancien inventaire peut répartir l’eau entre le nom canonique et ses alias.
+        sources = (recipe.depart, *(
+            alias for alias, potion in WATER_BOTTLE_ALIASES.items() if potion == recipe.depart
+        ))
+        remaining = quantity
+        for name in sources:
+            already_used = withdrawals.get(name, 0)
+            taken = min(remaining, stock.get(name, 0) - already_used)
+            if taken:
+                withdrawals[name] = already_used + taken
+                remaining -= taken
+            if remaining == 0:
+                return withdrawals
+
+    return None

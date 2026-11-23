@@ -32,13 +32,14 @@ def cyclic_catalogue():
     )
 
 
-def test_regeneration():
+@pytest.mark.parametrize("water", ["potion_type:water", "water_bottle", "water_bottles"])
+def test_regeneration(water):
     """Charge le catalogue Bedrock et vérifie que le stock préparé produit la suite attendue
     vers la régénération avec les bons réactifs. Vérifie aussi qu’un réactif seul ne permet
     aucun brassage.
     """
     catalogue = charger_catalogue(RECIPES)
-    stock = {"potion_type:water": 1, "nether_wart": 1, "ghast_tear": 1, "potion_type:speed": 1}
+    stock = {water: 1, "nether_wart": 1, "ghast_tear": 1, "potion_type:speed": 1}
     recipes = calculer_suites(catalogue, stock)["potion_type:regeneration"]
 
     assert [(recipe.depart, [step.arrivee for step in recipe.etapes], recipe.total_reactifs)

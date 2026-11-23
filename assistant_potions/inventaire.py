@@ -102,11 +102,17 @@ def write_inventory(path: Path, inventory: Mapping[str, EntreeInventaire]) -> No
 
 
 def ajouter_au_stock(chemin: Path, ajouts: Mapping[str, int]) -> None:
-    """Applique un lot dont les noms courts et les quantités sont déjà validés. Relit et
-    remplace le stock sous verrou en préservant les niveaux existants, ou lève
-    ErreurInventaire en cas d’échec.
+    """Ajoute un lot validé à l’inventaire en préservant les niveaux existants."""
+    mettre_a_jour_stock(chemin, ajouts, retraits={})
+
+
+def mettre_a_jour_stock(
+    chemin: Path, ajouts: Mapping[str, int], *, retraits: Mapping[str, int]
+) -> None:
+    """Applique des quantités positives sous verrou et remplace le stock en une seule écriture.
+    Lève ErreurInventaire si un retrait dépasse le stock courant ou si la sauvegarde échoue.
     """
-    if not ajouts:
+    if not ajouts and not retraits:
         return
 
     lock = chemin.with_name(chemin.name + ".lock")
@@ -116,6 +122,11 @@ def ajouter_au_stock(chemin: Path, ajouts: Mapping[str, int]) -> None:
         try:
             lock_file.close()
             inventory = lire_inventaire(chemin)
+            for name, quantity in retraits.items():
+                entry = inventory.get(name)
+                if entry is None or entry.nombre < quantity:
+                    raise ErreurInventaire(f"Stock insuffisant pour {name}.")
+                inventory[name] = EntreeInventaire(entry.nombre - quantity, entry.niveau)
             for name, quantity in ajouts.items():
                 entry = inventory.get(name)
                 if entry is None:

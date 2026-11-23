@@ -18,7 +18,7 @@ L’exécutable se trouve dans `.venv\Scripts\potions.exe`. Après activation de
 Pour utiliser `potions` dans les nouveaux terminaux PowerShell sans activer l’environnement, exécute une fois cette commande depuis le dossier du projet.
 
 ```powershell
-.\.venv\Scripts\potions.exe --install-command
+.\.venv\Scripts\potions.exe --install
 ```
 
 L’option enregistre l’alias dans le profil de ton compte pour les versions de PowerShell trouvées. Ouvre un nouveau terminal et tape `potions --help`. Si tu déplaces le projet, relance l’option depuis le nouvel exécutable pour mettre à jour le chemin. Pour retirer l’alias, supprime la ligne marquée `# assistant-potions: alias potions` dans les profils indiqués par la commande.
@@ -45,6 +45,8 @@ Réactifs :
   ghast_tear : 1
   nether_wart : 1
 ```
+
+Pour brasser, lance `potions --brew potion_type:regeneration` ou `potions -b potion_type:regeneration`, puis saisis le nombre de potions à créer. La commande utilise la recette la plus courte qui couvre tout le lot. Elle retire les potions de départ et les réactifs, puis enregistre les potions obtenues dans la même mise à jour. Si le stock est insuffisant, elle refuse le lot.
 
 Pour retrouver le nom d’un ingrédient de brassage dans le catalogue, utilise `potions --search ghast` ou `potions -sch ghast`. La recherche accepte un nom complet ou partiel, ignore la casse et affiche les résultats en ordre alphabétique. Par exemple, `ghast` donne `ghast_tear`.
 

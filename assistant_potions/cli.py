@@ -5,9 +5,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from .brassage import Suite, calculer_suites
-from .catalogue import Catalogue, ErreurCatalogue, charger_catalogue, nom_court
-from .inventaire import ErreurInventaire, ajouter_au_stock, lire_inventaire
+from .brassage import Suite, calculer_suites, retraits_brassage
+from .catalogue import (
+    WATER_BOTTLE_ALIASES, Catalogue, ErreurCatalogue, charger_catalogue, nom_court,
+)
+from .inventaire import ErreurInventaire, ajouter_au_stock, lire_inventaire, mettre_a_jour_stock
 from .powershell import CommandInstallationError, install_command
 
 
@@ -18,11 +20,12 @@ COMMANDS = (
     ("--help", "-h", "help", "Afficher l’aide."),
     ("--list", "-l", "list", "Lister les potions réalisables."),
     ("--recipes", "-r", "recipes", "POTION : afficher toutes ses recettes réalisables."),
+    ("--brew", "-b", "brew", "POTION : demander la quantité et brasser la potion."),
     ("--show", "-s", "show", "Afficher l’inventaire."),
     ("--search", "-sch", "search", "INGRÉDIENT : chercher par nom dans le catalogue."),
     ("--add", "-a", "add", "OBJET QUANTITÉ : ajouter un objet au stock."),
     ("--add_multiple", "-am", "batch", "OBJET QUANTITÉ ... : ajouter plusieurs paires."),
-    ("--install-command", None, "install", "Enregistrer la commande potions dans PowerShell."),
+    ("--install", None, "install", "Enregistrer la commande potions dans PowerShell."),
 )
 
 
@@ -42,6 +45,7 @@ def make_parser() -> argparse.ArgumentParser:
             "  potions -s\n"
             "  potions -l\n"
             "  potions -r potion_type:regeneration\n"
+            "  potions -b potion_type:regeneration\n"
             "  potions -sch ghast\n"
             f"  {ADD_EXAMPLE}\n"
             f"  {BATCH_EXAMPLE}"
@@ -78,12 +82,13 @@ def validate_additions(
     """
     additions: dict[str, int] = {}
     warnings = []
+    ingredients = catalogue.ingredients
     for index in range(0, len(args), 2):
         name = nom_court(args[index])
         if index + 1 == len(args):
             warnings.append(f"Quantité manquante pour {name}.")
             continue
-        if name not in catalogue.reactifs and name not in catalogue.potions:
+        if name not in ingredients:
             warnings.append(f"{UNKNOWN_INGREDIENT} ({name}).")
             continue
         try:
@@ -91,7 +96,8 @@ def validate_additions(
         except ValueError:
             warnings.append(f"Quantité invalide pour {name}. Entrez un entier positif.")
             continue
-        additions[name] = additions.get(name, 0) + quantity
+        stock_name = WATER_BOTTLE_ALIASES.get(name, name)
+        additions[stock_name] = additions.get(stock_name, 0) + quantity
     return additions, warnings
 
 
@@ -105,6 +111,25 @@ def print_recipe(recipe: Suite) -> None:
     print("Réactifs :")
     for reagent, total in sorted(recipe.total_reactifs.items()):
         print(f"  {reagent} : {total}")
+
+
+def brew_potions(target: str, catalogue: Catalogue, inventory_path: Path) -> None:
+    """Demande la taille du lot, puis consomme le nécessaire et ajoute les potions au stock."""
+    try:
+        quantity = parse_quantity(input("Combien de potions veux-tu créer ? ").strip())
+    except (EOFError, KeyboardInterrupt) as error:
+        raise CommandError("Brassage annulé.") from error
+    except ValueError as error:
+        raise CommandError("Saisis un nombre entier strictement positif.") from error
+
+    stock = {name: entry.nombre for name, entry in lire_inventaire(inventory_path).items()}
+    recipes = calculer_suites(catalogue, stock).get(target, [])
+    withdrawals = retraits_brassage(recipes, stock, quantity)
+    if withdrawals is None:
+        raise ErreurInventaire(f"Stock insuffisant pour créer {quantity} × {target}.")
+
+    mettre_a_jour_stock(inventory_path, {target: quantity}, retraits=withdrawals)
+    print(f"Ajout à l’inventaire : {quantity} × {target}.")
 
 
 def main(
@@ -145,8 +170,8 @@ def main(
             return 2
         if command == "add" and len(values) != 2:
             raise CommandError("--add exige exactement une paire OBJET QUANTITÉ.")
-        if command == "recipes" and len(values) != 1:
-            raise CommandError("--recipes exige exactement un nom de potion.")
+        if command in {"recipes", "brew"} and len(values) != 1:
+            raise CommandError(f"--{command} exige exactement un nom de potion.")
         if command == "search":
             if len(values) != 1:
                 raise CommandError("--search exige exactement un nom ou un fragment de nom.")
@@ -174,7 +199,7 @@ def main(
         catalogue = charger_catalogue(recipes_path)
 
         if command == "search":
-            matching = sorted(name for name in catalogue.reactifs if query in name.casefold())
+            matching = sorted(name for name in catalogue.ingredients if query in name.casefold())
             if matching:
                 print("\n".join(matching))
             else:
@@ -192,10 +217,13 @@ def main(
             return 2 if warnings else 0
 
         target = None
-        if command == "recipes":
+        if command in {"recipes", "brew"}:
             target = nom_court(values[0])
             if target not in catalogue.potions:
                 raise CommandError(f"Potion inconnue ({target}).")
+            if command == "brew":
+                brew_potions(target, catalogue, inventory_path)
+                return 0
 
         stock = {name: entry.nombre for name, entry in lire_inventaire(inventory_path).items()}
         recipes = calculer_suites(catalogue, stock)

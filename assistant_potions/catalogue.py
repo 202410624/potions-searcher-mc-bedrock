@@ -12,6 +12,7 @@ CONTAINER_KEY = "minecraft:recipe_brewing_container"
 CONTAINERS = ("potion", "splash_potion", "lingering_potion")
 POTION_PREFIXES = dict(zip(CONTAINERS, ("potion_type", "splash_potion", "lingering_potion")))
 EFFECT_NAMES = {"Awkward": "awkward", "Thick": "thick"}
+WATER_BOTTLE_ALIASES = dict.fromkeys(("water_bottle", "water_bottles"), "potion_type:water")
 
 
 class ErreurCatalogue(ValueError):
@@ -36,6 +37,12 @@ class Catalogue:
     potions: frozenset[str]
     reactifs: frozenset[str]
     par_depart: dict[str, tuple[Transition, ...]]
+
+    @property
+    def ingredients(self) -> frozenset[str]:
+        """Regroupe les noms des réactifs, des potions et des alias utilisables."""
+        aliases = {name for name, potion in WATER_BOTTLE_ALIASES.items() if potion in self.potions}
+        return self.reactifs | self.potions | aliases
 
 
 def nom_court(nom: str) -> str:

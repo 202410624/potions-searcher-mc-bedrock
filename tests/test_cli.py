@@ -50,7 +50,7 @@ def test_aide_et_stock(option, run, capsys):
     assert run(option) == 0
     output = capsys.readouterr().out
     for flag in ("--help", "-h", "--list", "-l", "--show", "-s", "--recipes", "-r",
-                 "--search", "-sch", "--add", "-a", "--add_multiple", "-am", "--install-command"):
+                 "--search", "-sch", "--add", "-a", "--add_multiple", "-am", "--install"):
         assert flag in output
     assert "POTION" in output and "OBJET QUANTITÉ" in output
     assert "potions -a ghast_tear 6" in output
@@ -90,6 +90,10 @@ def test_recherche_ingredients(run, capsys, inventory):
     assert capsys.readouterr().out == "ghast_tear\n"
     assert run("-sch", "minecraft:ghast_tear") == 0
     assert capsys.readouterr().out == "ghast_tear\n"
+    assert run("-sch", "potion_type:regeneration") == 0
+    assert REGENERATION in capsys.readouterr().out.splitlines()
+    assert run("-sch", "water_bottle") == 0
+    assert capsys.readouterr().out.splitlines() == ["water_bottle", "water_bottles"]
     assert run("-sch", "ingredient_inconnu") == 0
     assert "Aucun ingrédient trouvé" in capsys.readouterr().out
     assert not inventory.exists()
@@ -149,10 +153,9 @@ def test_liste_et_recettes(run, capsys, inventory):
     chaque ligne de la recette avec les deux variantes des options. Vérifie aussi que les
     consultations préservent le stock.
     """
-    write_stock(inventory, {
-        WATER: {"nombre": 1, "niveau": 1}, "nether_wart": {"nombre": 1},
-        "ghast_tear": {"nombre": 1}, "potion_type:speed": {"nombre": 1, "niveau": 1},
-    })
+    assert run("-a", "minecraft:water_bottle", "1") == 0
+    assert run("-am", "water_bottles", "1", "nether_wart", "1", "ghast_tear", "1") == 0
+    assert json.loads(inventory.read_text(encoding="utf-8"))[WATER]["nombre"] == 2
     original = inventory.read_bytes()
     for option in ("--list", "-l"):
         assert run(option) == 0
@@ -167,6 +170,10 @@ def test_liste_et_recettes(run, capsys, inventory):
         ]
     assert inventory.read_bytes() == original
 
+    assert run("-a", "potion_type:awkward", "1") == 0
+    assert run("-r", REGENERATION) == 0
+    assert "Départ : potion_type:awkward" in capsys.readouterr().out.splitlines()
+
 
 def test_recettes_sans_resultat(run, capsys):
     """Consulte les brassages avec un stock vide et vérifie le succès et les messages
@@ -176,6 +183,40 @@ def test_recettes_sans_resultat(run, capsys):
     assert capsys.readouterr().out.strip() == "Aucune potion réalisable."
     assert run("-r", REGENERATION) == 0
     assert capsys.readouterr().out.strip() == f"Aucune recette réalisable pour {REGENERATION}."
+
+
+@pytest.mark.parametrize("option", ["-b", "--brew"])
+def test_brassage_du_lot(option, run, inventory, monkeypatch, capsys):
+    """Brasse deux potions avec les bouteilles d’eau sous deux noms. Vérifie le cumul
+    du résultat, le retrait de chaque réactif et la conservation de la potion intermédiaire.
+    """
+    awkward = "potion_type:awkward"
+    write_stock(inventory, {
+        WATER: {"nombre": 1}, "water_bottles": {"nombre": 1},
+        awkward: {"nombre": 1}, REGENERATION: {"nombre": 1, "niveau": 2},
+        "nether_wart": {"nombre": 3}, "ghast_tear": {"nombre": 2},
+    })
+    monkeypatch.setattr("builtins.input", lambda prompt: "2")
+
+    assert run(option, f"minecraft:{REGENERATION}") == 0
+    assert f"2 × {REGENERATION}" in capsys.readouterr().out
+    assert json.loads(inventory.read_text(encoding="utf-8")) == {
+        WATER: {"nombre": 0, "niveau": 1}, "water_bottles": {"nombre": 0},
+        awkward: {"nombre": 1, "niveau": 1}, REGENERATION: {"nombre": 3, "niveau": 2},
+        "nether_wart": {"nombre": 1}, "ghast_tear": {"nombre": 0},
+    }
+
+
+@pytest.mark.parametrize(("quantity", "expected_code"), [("2", 1), ("0", 2), ("abc", 2)])
+def test_brassage_refuse_sans_modifier_le_stock(quantity, expected_code, run, inventory, monkeypatch):
+    """Soumet un lot trop grand ou une quantité invalide et vérifie que le JSON reste intact."""
+    write_stock(inventory, {WATER: {"nombre": 2}, "nether_wart": {"nombre": 2},
+                            "ghast_tear": {"nombre": 1}})
+    original = inventory.read_bytes()
+    monkeypatch.setattr("builtins.input", lambda prompt: quantity)
+
+    assert run("-b", REGENERATION) == expected_code
+    assert inventory.read_bytes() == original
 
 
 @pytest.mark.parametrize("args", [
@@ -252,17 +293,17 @@ def test_install_command_updates_powershell_profiles(run, tmp_path, monkeypatch,
     monkeypatch.setattr("assistant_potions.powershell.find_profiles", lambda: [profile])
     monkeypatch.setattr("assistant_potions.powershell.find_launcher", lambda: launcher)
 
-    assert run("--install-command", recipes=tmp_path / "absent") == 0
+    assert run("--install", recipes=tmp_path / "absent") == 0
     assert str(profile) in capsys.readouterr().out
     first_installation = profile.read_bytes()
     assert first_installation.decode("utf-8-sig").startswith(original.decode() + "\r\n")
     assert str(launcher) in first_installation.decode("utf-8-sig")
-    assert run("--install-command") == 0
+    assert run("--install") == 0
     assert profile.read_bytes() == first_installation
 
     old_launcher = launcher
     launcher = tmp_path / "Dossier d'examen" / "potions.exe"
-    assert run("--install-command") == 0
+    assert run("--install") == 0
     updated = profile.read_text(encoding="utf-8-sig")
     escaped_target = str(launcher).replace("'", "''")
     assert f"Set-Alias -Name potions -Value '{escaped_target}'" in updated
@@ -280,5 +321,5 @@ def test_install_command_rejects_extra_arguments(run, monkeypatch, capsys):
         pytest.fail("Une commande invalide ne doit pas accéder au profil.")
 
     monkeypatch.setattr("assistant_potions.cli.install_command", unexpected_install)
-    assert run("--install-command", "surplus") == 2
-    assert "--install-command ne prend aucun argument." in capsys.readouterr().err
+    assert run("--install", "surplus") == 2
+    assert "--install ne prend aucun argument." in capsys.readouterr().err
