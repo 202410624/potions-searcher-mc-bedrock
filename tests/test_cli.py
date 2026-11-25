@@ -50,7 +50,8 @@ def test_aide_et_stock(option, run, capsys):
     assert run(option) == 0
     output = capsys.readouterr().out
     for flag in ("--help", "-h", "--list", "-l", "--show", "-s", "--recipes", "-r",
-                 "--search", "-sch", "--add", "-a", "--add_multiple", "-am", "--install"):
+                 "--search", "-sch", "--add", "-a", "--add_multiple", "-am", "--install",
+                 "--clear", "-c", "--delete", "-d"):
         assert flag in output
     assert "POTION" in output and "OBJET QUANTITÉ" in output
     assert "potions -a ghast_tear 6" in output
@@ -70,6 +71,44 @@ def test_affichage_stock(option, run, capsys, inventory):
     assert capsys.readouterr().out == "ghast_tear : 1\nnether_wart : 2\n"
 
 
+@pytest.mark.parametrize("option", ["-c", "--clear"])
+def test_vider_inventaire(option, run, inventory, tmp_path):
+    """Vide un stock sans catalogue et vérifie qu’une deuxième commande réussit aussi."""
+    write_stock(inventory, {WATER: {"nombre": 2}, "ghast_tear": {"nombre": 1}})
+    for _ in range(2):
+        assert run(option, recipes=tmp_path / "absent") == 0
+        assert json.loads(inventory.read_text(encoding="utf-8")) == {}
+
+
+@pytest.mark.parametrize("option", ["-d", "--delete"])
+def test_retirer_du_stock(option, run, inventory, tmp_path):
+    """Vérifie qu’un retrait partiel conserve le niveau et qu’un retrait total efface l’entrée."""
+    remaining = {"ghast_tear": {"nombre": 1}}
+    write_stock(inventory, {**remaining, WATER: {"nombre": 3, "niveau": 2}})
+    assert run(option, f"minecraft:{WATER}", "2", recipes=tmp_path / "absent") == 0
+    assert json.loads(inventory.read_text(encoding="utf-8")) == {
+        **remaining, WATER: {"nombre": 1, "niveau": 2},
+    }
+    assert run(option, WATER, "1", recipes=tmp_path / "absent") == 0
+    assert json.loads(inventory.read_text(encoding="utf-8")) == remaining
+
+
+@pytest.mark.parametrize(("args", "code"), [
+    (("-c", "extra"), 2),
+    (("-d", "ghast_tear"), 2),
+    (("-d", "ghast_tear", "0"), 2),
+    (("-d", "ghast_tear", "-1"), 2),
+    (("-d", "ghast_tear", "2"), 1),
+    (("-d", "nether_wart", "1"), 1),
+])
+def test_suppression_refusee(args, code, run, inventory):
+    """Vérifie que les refus de saisie ou de stock laissent le fichier intact."""
+    write_stock(inventory, {"ghast_tear": {"nombre": 1}})
+    original = inventory.read_bytes()
+    assert run(*args) == code
+    assert inventory.read_bytes() == original
+
+
 def test_ajouts_valides(run, inventory):
     """Ajoute des réactifs seuls et par lots avec les alias longs et courts. Vérifie la
     normalisation du préfixe et le cumul des quantités dans le JSON.
@@ -85,7 +124,9 @@ def test_ajouts_valides(run, inventory):
 
 
 def test_recherche_ingredients(run, capsys, inventory):
-    """Recherche dans le catalogue sans inventaire, par fragment ou identifiant complet."""
+    """Recherche par fragment ou identifiant complet dans le catalogue avec un inventaire absent.
+    Vérifie qu’afficher les correspondances ou leur absence ne crée pas l’inventaire.
+    """
     assert run("--search", "GHAST") == 0
     assert capsys.readouterr().out == "ghast_tear\n"
     assert run("-sch", "minecraft:ghast_tear") == 0
@@ -187,8 +228,9 @@ def test_recettes_sans_resultat(run, capsys):
 
 @pytest.mark.parametrize("option", ["-b", "--brew"])
 def test_brassage_du_lot(option, run, inventory, monkeypatch, capsys):
-    """Brasse deux potions avec les bouteilles d’eau sous deux noms. Vérifie le cumul
-    du résultat, le retrait de chaque réactif et la conservation de la potion intermédiaire.
+    """Brasse deux potions avec de l’eau stockée sous deux noms et une seule potion intermédiaire.
+    Vérifie le retrait de l’eau et des réactifs, le cumul sans changement de niveau et la
+    conservation de la potion intermédiaire.
     """
     awkward = "potion_type:awkward"
     write_stock(inventory, {
@@ -209,7 +251,9 @@ def test_brassage_du_lot(option, run, inventory, monkeypatch, capsys):
 
 @pytest.mark.parametrize(("quantity", "expected_code"), [("2", 1), ("0", 2), ("abc", 2)])
 def test_brassage_refuse_sans_modifier_le_stock(quantity, expected_code, run, inventory, monkeypatch):
-    """Soumet un lot trop grand ou une quantité invalide et vérifie que le JSON reste intact."""
+    """Prépare de quoi brasser une potion, puis soumet un lot trop grand ou une quantité invalide.
+    Vérifie le code de refus et la conservation du JSON à l’identique.
+    """
     write_stock(inventory, {WATER: {"nombre": 2}, "nether_wart": {"nombre": 2},
                             "ghast_tear": {"nombre": 1}})
     original = inventory.read_bytes()

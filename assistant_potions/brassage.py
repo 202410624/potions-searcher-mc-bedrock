@@ -1,4 +1,4 @@
-"""Calcule les suites de brassage réalisables avec les potions et les réactifs en stock."""
+"""Recherche les recettes réalisables et calcule les prélèvements pour brasser un lot."""
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -56,8 +56,9 @@ def calculer_suites(
 def retraits_brassage(
     recipes: Sequence[Suite], stock: Mapping[str, int], quantity: int
 ) -> dict[str, int] | None:
-    """Retourne ce que consomme la suite la plus courte qui permet de produire tout le lot.
-    Tient compte des alias d’eau déjà stockés. Retourne None si aucune suite ne suffit.
+    """Calcule les quantités à retirer pour la suite la plus courte qui couvre tout le lot.
+    Répartit au besoin le prélèvement d’eau entre ses noms en stock et retourne `None`
+    si aucune suite ne convient.
     """
     for recipe in sorted(recipes, key=lambda suite: len(suite.etapes)):
         withdrawals = {name: total * quantity for name, total in recipe.total_reactifs.items()}

@@ -3,7 +3,8 @@
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -106,33 +107,16 @@ def ajouter_au_stock(chemin: Path, ajouts: Mapping[str, int]) -> None:
     mettre_a_jour_stock(chemin, ajouts, retraits={})
 
 
-def mettre_a_jour_stock(
-    chemin: Path, ajouts: Mapping[str, int], *, retraits: Mapping[str, int]
-) -> None:
-    """Applique des quantités positives sous verrou et remplace le stock en une seule écriture.
-    Lève ErreurInventaire si un retrait dépasse le stock courant ou si la sauvegarde échoue.
-    """
-    if not ajouts and not retraits:
-        return
-
+@contextmanager
+def verrouiller_inventaire(chemin: Path) -> Iterator[None]:
+    """Réserve l’écriture de l’inventaire et libère le verrou même en cas d’échec."""
     lock = chemin.with_name(chemin.name + ".lock")
     try:
         chemin.parent.mkdir(parents=True, exist_ok=True)
         lock_file = lock.open("x", encoding="utf-8")
         try:
             lock_file.close()
-            inventory = lire_inventaire(chemin)
-            for name, quantity in retraits.items():
-                entry = inventory.get(name)
-                if entry is None or entry.nombre < quantity:
-                    raise ErreurInventaire(f"Stock insuffisant pour {name}.")
-                inventory[name] = EntreeInventaire(entry.nombre - quantity, entry.niveau)
-            for name, quantity in ajouts.items():
-                entry = inventory.get(name)
-                if entry is None:
-                    entry = EntreeInventaire(0, 1 if is_potion(name) else None)
-                inventory[name] = EntreeInventaire(entry.nombre + quantity, entry.niveau)
-            write_inventory(chemin, inventory)
+            yield
         finally:
             lock.unlink()
     except OSError as error:
@@ -141,3 +125,45 @@ def mettre_a_jour_stock(
         if isinstance(error, ErreurInventaire):
             raise
         raise ErreurInventaire(f"Impossible d’encoder l’inventaire ({error}).") from error
+
+
+def vider_inventaire(chemin: Path) -> None:
+    """Remplace le stock par un inventaire vide sous verrou, s’il existe déjà."""
+    with verrouiller_inventaire(chemin):
+        try:
+            chemin.stat()
+        except FileNotFoundError:
+            return
+        write_inventory(chemin, {})
+
+
+def mettre_a_jour_stock(
+    chemin: Path,
+    ajouts: Mapping[str, int],
+    *,
+    retraits: Mapping[str, int],
+    supprimer_epuise: bool = False,
+) -> None:
+    """Applique les mouvements sous verrou et retire les entrées épuisées si demandé.
+    Lève `ErreurInventaire` si un retrait dépasse le stock courant ou si la mise à jour échoue.
+    """
+    if not ajouts and not retraits:
+        return
+
+    with verrouiller_inventaire(chemin):
+        inventory = lire_inventaire(chemin)
+        for name, quantity in retraits.items():
+            entry = inventory.get(name)
+            if entry is None or entry.nombre < quantity:
+                raise ErreurInventaire(f"Stock insuffisant pour {name}.")
+            remaining = entry.nombre - quantity
+            if supprimer_epuise and remaining == 0 and name not in ajouts:
+                del inventory[name]
+            else:
+                inventory[name] = EntreeInventaire(remaining, entry.niveau)
+        for name, quantity in ajouts.items():
+            entry = inventory.get(name)
+            if entry is None:
+                entry = EntreeInventaire(0, 1 if is_potion(name) else None)
+            inventory[name] = EntreeInventaire(entry.nombre + quantity, entry.niveau)
+        write_inventory(chemin, inventory)

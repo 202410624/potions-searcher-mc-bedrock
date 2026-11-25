@@ -46,6 +46,10 @@ Réactifs :
   nether_wart : 1
 ```
 
+Pour retirer deux unités de `ghast_tear`, utilise `potions -d ghast_tear 2` ou `potions --delete ghast_tear 2`. Utilise le nom affiché par `potions -s` et une quantité entière positive. Si le stock est insuffisant, la commande refuse le retrait et conserve le stock. Quand la quantité atteint zéro, l’objet disparaît de l’inventaire.
+
+Pour vider tout l’inventaire, utilise `potions -c` ou `potions --clear`.
+
 Pour brasser, lance `potions --brew potion_type:regeneration` ou `potions -b potion_type:regeneration`, puis saisis le nombre de potions à créer. La commande utilise la recette la plus courte qui couvre tout le lot. Elle retire les potions de départ et les réactifs, puis enregistre les potions obtenues dans la même mise à jour. Si le stock est insuffisant, elle refuse le lot.
 
 Pour retrouver le nom d’un ingrédient de brassage dans le catalogue, utilise `potions --search ghast` ou `potions -sch ghast`. La recherche accepte un nom complet ou partiel, ignore la casse et affiche les résultats en ordre alphabétique. Par exemple, `ghast` donne `ghast_tear`.

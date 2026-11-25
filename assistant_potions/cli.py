@@ -9,7 +9,9 @@ from .brassage import Suite, calculer_suites, retraits_brassage
 from .catalogue import (
     WATER_BOTTLE_ALIASES, Catalogue, ErreurCatalogue, charger_catalogue, nom_court,
 )
-from .inventaire import ErreurInventaire, ajouter_au_stock, lire_inventaire, mettre_a_jour_stock
+from .inventaire import (
+    ErreurInventaire, ajouter_au_stock, lire_inventaire, mettre_a_jour_stock, vider_inventaire,
+)
 from .powershell import CommandInstallationError, install_command
 
 
@@ -22,6 +24,8 @@ COMMANDS = (
     ("--recipes", "-r", "recipes", "POTION : afficher toutes ses recettes réalisables."),
     ("--brew", "-b", "brew", "POTION : demander la quantité et brasser la potion."),
     ("--show", "-s", "show", "Afficher l’inventaire."),
+    ("--clear", "-c", "clear", "Vider l’inventaire."),
+    ("--delete", "-d", "delete", "OBJET QUANTITÉ : retirer un objet du stock."),
     ("--search", "-sch", "search", "INGRÉDIENT : chercher par nom dans le catalogue."),
     ("--add", "-a", "add", "OBJET QUANTITÉ : ajouter un objet au stock."),
     ("--add_multiple", "-am", "batch", "OBJET QUANTITÉ ... : ajouter plusieurs paires."),
@@ -43,6 +47,8 @@ def make_parser() -> argparse.ArgumentParser:
             "Exemples :\n"
             "  potions -h\n"
             "  potions -s\n"
+            "  potions -d ghast_tear 2\n"
+            "  potions -c\n"
             "  potions -l\n"
             "  potions -r potion_type:regeneration\n"
             "  potions -b potion_type:regeneration\n"
@@ -114,7 +120,10 @@ def print_recipe(recipe: Suite) -> None:
 
 
 def brew_potions(target: str, catalogue: Catalogue, inventory_path: Path) -> None:
-    """Demande la taille du lot, puis consomme le nécessaire et ajoute les potions au stock."""
+    """Demande la quantité de la potion cible, puis enregistre les retraits et les ajouts ensemble.
+    Lève `CommandError` si la saisie est invalide ou annulée, et `ErreurInventaire`
+    si le stock est insuffisant ou si l’inventaire ne peut pas être lu ou mis à jour.
+    """
     try:
         quantity = parse_quantity(input("Combien de potions veux-tu créer ? ").strip())
     except (EOFError, KeyboardInterrupt) as error:
@@ -154,7 +163,7 @@ def main(
         # Seule l’option initiale est analysée par argparse. Le reste forme les données.
         command = parser.parse_args(args[:1]).command
         values = args[1:]
-        if command in {"help", "list", "show", "install"} and values:
+        if command in {"help", "list", "show", "clear", "install"} and values:
             raise CommandError(f"{args[0]} ne prend aucun argument.")
         if command == "help":
             parser.print_help()
@@ -168,8 +177,8 @@ def main(
             print(ADD_EXAMPLE if command == "add" else BATCH_EXAMPLE)
             parser.print_help(file=sys.stderr)
             return 2
-        if command == "add" and len(values) != 2:
-            raise CommandError("--add exige exactement une paire OBJET QUANTITÉ.")
+        if command in {"add", "delete"} and len(values) != 2:
+            raise CommandError(f"--{command} exige exactement une paire OBJET QUANTITÉ.")
         if command in {"recipes", "brew"} and len(values) != 1:
             raise CommandError(f"--{command} exige exactement un nom de potion.")
         if command == "search":
@@ -191,6 +200,20 @@ def main(
                 print("L’inventaire est vide.")
             for name, entry in sorted(inventory.items()):
                 print(f"{name} : {entry.nombre}")
+            return 0
+
+        if command == "clear":
+            vider_inventaire(inventory_path)
+            print("L’inventaire est vide.")
+            return 0
+        if command == "delete":
+            name = nom_court(values[0])
+            try:
+                quantity = parse_quantity(values[1])
+            except ValueError as error:
+                raise CommandError("Saisis un nombre entier strictement positif.") from error
+            mettre_a_jour_stock(inventory_path, {}, retraits={name: quantity}, supprimer_epuise=True)
+            print(f"Retrait de l’inventaire : {quantity} × {name}.")
             return 0
 
         recipes_path = dossier_recettes
